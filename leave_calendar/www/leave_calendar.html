@@ -6,6 +6,16 @@
     <title>{{ _("Leave Calendar") }} {{ year }}</title>
     <link rel="stylesheet" href="leave_calendar.css">
     <link rel="icon" href="{{ favicon }}">
+    <style>
+        .filter-container { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; }
+        .filter { display: flex; align-items: center; gap: 5px; }
+        .filter label { font-weight: 600; white-space: nowrap; }
+        .filter input[type="date"] { padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; }
+        .export-btn { background-color: #2ecc71; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        .export-btn:hover { background-color: #27ae60; }
+        .export-btn.pdf { background-color: #e74c3c; }
+        .export-btn.pdf:hover { background-color: #c0392b; }
+    </style>
 </head>
 <body>
     {% if logged_in %}
@@ -18,45 +28,80 @@
     <div class="container">
         <div class="view">
             <div class="legend">
-                    <div class="legend-item">
-                        <span class="vacation-day-field default"></span>= {{ _("No Entry") }}
-                    </div>
-                    <div class="legend-item">
-                        <span class="vacation-day-field default">S</span>= {{ _("Saturday/Sunday") }}
-                    </div>
-                    <div class="legend-item">
-                        <span class="vacation-day-field holiday">H</span>= {{ _("Official Holiday") }}
-                    </div>
-                    <div class="legend-item">
-                        <span class="vacation-day-field absence">A</span>= {{ _("Absent") }}
-                    </div>
+                <div class="legend-item"><span class="vacation-day-field default"></span>= {{ _("No Entry") }}</div>
+                <div class="legend-item"><span class="vacation-day-field default">S</span>= {{ _("Saturday/Sunday") }}</div>
+                <div class="legend-item"><span class="vacation-day-field holiday">H</span>= {{ _("Official Holiday") }}</div>
+                <div class="legend-item"><span class="vacation-day-field absence">A</span>= {{ _("Absent") }}</div>
                 {% for leave_type in leave_types %}
-                    <div class="legend-item">
-                        <span class="vacation-day-field" style="background-color: {{ leave_type.color }};">{{ leave_type.abbreviation }}</span> = {{ leave_type.leave_type }}
-                    </div>
+                <div class="legend-item">
+                    <span class="vacation-day-field" style="background-color: {{ leave_type.color }};">{{ leave_type.abbreviation }}</span> = {{ leave_type.leave_type }}
+                </div>
                 {% endfor %}
             </div>
             <div class="filter-container">
-                <div class="current-year">
-                    <span>{{ _("Year") }} {{ year }}</span>
-                </div>
                 <div class="filter">
-                    <label for="departmentFilter">{{ _("Filter by Department: ") }}</label>
-                    <select id="departmentFilter" onchange="updateDepartmentFilter()">
-                        <option value="all" {% if selected_department == 'all' %}selected{% endif %}>{{ _("All Departments") }}</option>
+                    <label for="departmentFilter">{{ _("Department:") }}</label>
+                    <select id="departmentFilter" onchange="updateFilters()">
+                        <option value="all" {% if selected_department == 'all' %}selected{% endif %}>{{ _("All") }}</option>
                         {% for department in departments %}
                             <option value="{{ department.name }}" {% if selected_department == department.name %}selected{% endif %}>{{ department.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
+                <div class="filter">
+                    <label for="employeeFilter">{{ _("Employee:") }}</label>
+                    <select id="employeeFilter" onchange="updateFilters()">
+                        <option value="all" {% if selected_employee == 'all' %}selected{% endif %}>{{ _("All") }}</option>
+                        {% for emp in all_employees %}
+                            <option value="{{ emp.name }}" {% if selected_employee == emp.name %}selected{% endif %}>{{ emp.employee_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter">
+                    <label for="fromDate">{{ _("From:") }}</label>
+                    <input type="date" id="fromDate" value="{{ from_date }}" onchange="updateFilters()">
+                </div>
+                <div class="filter">
+                    <label for="toDate">{{ _("To:") }}</label>
+                    <input type="date" id="toDate" value="{{ to_date }}" onchange="updateFilters()">
+                </div>
                 <div class="year-filter">
-                    <button class="year-button" id="prevYear" onclick="changeYear(-1)">&#60;&#60;</button>
+                    <button class="year-button" onclick="changeYear(-1)">&#60;&#60;</button>
                     <span class="current-year-display">{{ year }}</span>
-                    <button class="year-button" id="nextYear" onclick="changeYear(1)">&#62;&#62;</button>
+                    <button class="year-button" onclick="changeYear(1)">&#62;&#62;</button>
+                </div>
+                <div style="display:flex;gap:6px;">
+                    <button class="export-btn" onclick="exportToExcel()">⬇ Excel</button>
+                    <button class="export-btn pdf" onclick="exportToPDF()">⬇ PDF</button>
                 </div>
             </div>
+
+            <!-- Hidden data for export with colors -->
+            <script type="application/json" id="calendarData">
+            {
+                "headers": ["Name","Total Leaves","Used Leaves","Remaining Leaves","New {{ year }}","Carry Forwarded {{ year - 1 }}"{% for header in day_headers %},"{{ header }}"{% endfor %}],
+                "rows": [
+                    {% for employee in employee_data %}
+                    {
+                        "name": {{ employee.employee_name | tojson }},
+                        "total": {{ employee.total_leaves_allocated | tojson }},
+                        "used": {{ employee.used_leaves | tojson }},
+                        "remaining": {{ employee.remaining_leaves | tojson }},
+                        "new_leaves": {{ employee.new_leaves_allocated | tojson }},
+                        "carry": {{ employee.unused_leaves | tojson }},
+                        "days": [
+                            {% for day in employee.days %}
+                            {"abbr": {{ day.type.abbreviation | tojson }}, "color": {{ day.type.color | tojson }}, "name": {{ day.type.name | tojson }}}{% if not loop.last %},{% endif %}
+                            {% endfor %}
+                        ]
+                    }{% if not loop.last %},{% endif %}
+                    {% endfor %}
+                ]
+            }
+            </script>
+
             <div class="table-wrapper">
-                <table class="table">
+                <table class="table" id="leaveCalendarTable">
                     <thead>
                         <tr class="sticky-header">
                             <th scope="col" class="sticky-first-cell text-left">Name</th>
@@ -108,12 +153,8 @@
         </div>
     {% endif %}
     <script>
-
         var loggedIn = {{ logged_in|tojson }};
-
-        if (!loggedIn) {
-            window.location.href = '/login';
-        }
+        if (!loggedIn) { window.location.href = '/login'; }
     </script>
     <script src="leave_calendar.js"></script>
 </body>
